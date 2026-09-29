@@ -16,6 +16,27 @@ Current components:
 
 ---
 
+## Agent CLI
+
+The TypeScript agent CLI requires Node.js 22.9 or newer and an OpenAI-compatible chat completions endpoint. Install dependencies and build it with:
+
+```bash
+npm ci
+npm run build
+```
+
+Copy the example configuration to `.env`, then replace its placeholder values with settings from the same provider. In PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env to set MINIPI_API_KEY, MINIPI_MODEL, and MINIPI_BASE_URL.
+npm start
+```
+
+`npm start` loads `.env` when it exists. Use `npm run dev` to build and start in one command. Conversation messages are saved in `~/.minipi/session.jsonl`.
+
+---
+
 ## Features
 
 ### Health Check

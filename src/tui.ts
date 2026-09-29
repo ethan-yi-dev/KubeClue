@@ -1,7 +1,7 @@
 // src/tui.ts
-// 极简终端界面 —— 单行输入 + 流式输出 + Ctrl+C 打断。
-// 不做 differential renderer、不做 component 树、不做 markdown 渲染。
-// 这些是"终端 UI 框架"的功课，不是"手撕 agent"的灵魂。
+// Minimal terminal UI: single-line input, streaming output, and Ctrl+C interruption.
+// No differential renderer, component tree, or Markdown rendering.
+// Those belong in a terminal UI framework, not in the core of this agent tutorial.
  
 import * as readline from 'readline'
  
@@ -10,26 +10,26 @@ export class Tui {
   private onPromptCb: ((text: string) => void) | null = null
   private onAbortCb: (() => void) | null = null
   private aborted = false
-  private busy = false  // agent 运行中时为 true，阻止并发输入
+  private busy = false  // True while the agent is running; prevents concurrent input.
  
-  /** 注册 prompt 回调 */
+  /** Register a prompt callback. */
   onPrompt(cb: (text: string) => void): void {
     this.onPromptCb = cb
   }
  
-  /** 注册 Ctrl+C 回调 */
+  /** Register a Ctrl+C callback. */
   onAbort(cb: () => void): void {
     this.onAbortCb = cb
   }
  
-  /** 启动 TUI，开始读输入 */
+  /** Start the TUI and begin reading input. */
   start(): void {
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
     })
     process.stdin.on('keypress', (_ch: string, key: { ctrl?: boolean; name?: string } | undefined) => {
-      // 只在 agent 运行时处理 Ctrl+C，空闲时交给 readline 默认行为
+      // Handle Ctrl+C only while the agent is running; otherwise let readline handle it.
       if (this.busy && key?.ctrl && key?.name === 'c' && !this.aborted) {
         this.aborted = true
         this.onAbortCb?.()
@@ -40,46 +40,46 @@ export class Tui {
   }
   private prompt(): void {
     if (!this.rl) return
-    if (this.busy) return  // agent 运行中，不显示 prompt
+    if (this.busy) return  // Do not show a prompt while the agent is running.
     this.aborted = false
     this.rl.question('> ', (answer) => {
       const text = answer.trim()
       if (text) {
         this.onPromptCb?.(text)
-        // 不立即递归 prompt()——等 setBusy(false) 时再调
+        // Wait for setBusy(false) before showing the next prompt.
       } else {
-        this.prompt()  // 空输入：重新提示，不触发回调
+        this.prompt()  // Prompt again on empty input without invoking the callback.
       }
     })
   }
  
-  /** agent 开始运行时调用，阻止新输入 */
+  /** Mark the agent as running to prevent new input. */
   setBusy(busy: boolean): void {
     this.busy = busy
-    if (!busy) this.prompt()  // agent 结束，恢复输入
+    if (!busy) this.prompt()  // Resume input when the agent finishes.
   }
  
-  /** 流式打印 assistant 文本 delta */
+  /** Print a streamed assistant text delta. */
   printText(delta: string): void {
     process.stdout.write(delta)
   }
  
-  /** 打印 tool 调用 */
+  /** Print a tool call. */
   printToolCall(name: string, args: unknown): void {
     process.stdout.write(`\n[tool: ${name}] ${JSON.stringify(args)}\n`)
   }
  
-  /** 打印 tool 结果 */
+  /** Print a tool result. */
   printToolResult(name: string, result: string): void {
     process.stdout.write(`[result: ${name}] ${result}\n`)
   }
  
-  /** 回合结束：换行 */
+  /** End the turn with a newline. */
   printTurnEnd(): void {
     process.stdout.write('\n')
   }
  
-  /** 停止 TUI，清理监听器 */
+  /** Stop the TUI and clean up listeners. */
   stop(): void {
     this.rl?.close()
     this.rl = null

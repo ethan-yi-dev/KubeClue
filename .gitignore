@@ -7,8 +7,8 @@ kubeconfig
 
 # Environment variables and secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 secrets.yaml
 secret.yaml
 *-secret.yaml
@@ -31,3 +31,5 @@ Thumbs.db
 coverage/
 dist/
 build/
+node_modules/
+.npm-cache/
