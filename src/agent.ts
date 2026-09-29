@@ -41,8 +41,8 @@ const KEEP_RECENT = 20;
 /**
  * Ask the LLM to summarize older messages and replace them with the summary.
  * This demonstrates how an agent manages a limited context window.
- * Unlike pi's full implementation, this tutorial uses message count as a simple
- * approximation instead of estimating tokens or finding turn boundaries.
+ * This tutorial uses message and character counts as simple approximations
+ * instead of estimating tokens or tracking complete turns.
  */
 async function compactContext(
   model: Model,
@@ -50,17 +50,43 @@ async function compactContext(
   signal?: AbortSignal,
 ): Promise<void> {
   if (signal?.aborted) return; // Do not replace context with an empty summary after an abort.
-  if (context.messages.length < COMPACT_THRESHOLD) return;
+  if (context.messages.length <= KEEP_RECENT) return;
+  if (
+    context.messages.length < COMPACT_THRESHOLD &&
+    JSON.stringify(context.messages).length < 80_000
+  ) return;
 
-  const oldMessages = context.messages.slice(0, -KEEP_RECENT);
-  const recentMessages = context.messages.slice(-KEEP_RECENT);
+  let cut = context.messages.length - KEEP_RECENT;
+  // Keep a tool result with the assistant message that called the tool.
+  while (cut > 0) {
+    const message = context.messages[cut];
+    if (
+      message.role !== "user" ||
+      !Array.isArray(message.content) ||
+      !message.content.some((block) => block.type === "tool_result")
+    ) break;
+    cut--;
+  }
+  if (cut === 0) return;
+
+  const oldMessages = context.messages.slice(0, cut);
+  const recentMessages = context.messages.slice(cut);
 
   // Serialize older messages as plain text for the LLM to summarize.
   const conversationText = oldMessages
-    .map(
-      (m) =>
-        `${m.role}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`,
-    )
+    .map((m) => {
+      const content = typeof m.content === "string"
+        ? m.content
+        : JSON.stringify(m.content.map((block) => {
+            if (block.type !== "tool_result" || block.content.length <= 2_000)
+              return block;
+            return {
+              ...block,
+              content: `${block.content.slice(0, 1_000)}\n...[truncated]...\n${block.content.slice(-1_000)}`,
+            };
+          }));
+      return `${m.role}: ${content}`;
+    })
     .join("\n");
 
   // Request a summary without exposing tools to the model.
@@ -71,20 +97,15 @@ async function compactContext(
   };
 
   let summary = "";
-  let failed = false;
+  let completed = false;
   for await (const ev of stream(model, summaryContext, { signal })) {
     if (ev.type === "text_delta") summary += ev.delta;
-    else if (
-      ev.type === "error" ||
-      (ev.type === "done" && ev.stopReason === "aborted")
-    ) {
-      failed = true;
-      break;
-    }
+    else if (ev.type === "done") completed = ev.stopReason === "end_turn";
+    else if (ev.type === "error") return;
   }
 
-  // Keep the original messages if summarization fails or returns no text.
-  if (failed || !summary) return;
+  // Keep the original messages unless a complete summary was returned.
+  if (!completed || signal?.aborted || !summary.trim()) return;
 
   // Replace older messages with the summary and keep recent messages.
   context.messages = [
