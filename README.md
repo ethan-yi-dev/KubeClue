@@ -10,8 +10,10 @@ This project provides small command-line tools for Kubernetes troubleshooting an
 
 Current components:
 
+- ✅ **SRE Agent CLI** – Calls the checks below as read-only tools and explains their results.
+- ✅ **Lab Check** – Validates the kind cluster, Cilium, workloads, endpoints, DNS, and baseline connectivity.
 - ✅ **Health Check** – Validate Service health from both the Kubernetes control plane and the data plane.
-- 🚧 **Connectivity Matrix** – Generate Pod-to-Pod and Service connectivity matrices.
+- ✅ **Connectivity Matrix** – Compare HTTP, TCP, and DNS results with the expected flows in `checks/connectivity.json`.
 - 🚧 **Incident Detector** – Detect common networking and configuration issues.
 
 ---
@@ -35,6 +37,18 @@ npm start
 
 `npm start` loads `.env` when it exists. Use `npm run dev` to build and start in one command. Conversation messages are saved in `~/.minipi/session.jsonl`.
 
+The CLI is a read-only K8s check agent. For example, ask “检查 sre-lab 的健康状况” or “为什么 nginx Service 不通？”. It can call:
+
+| Agent tool | Existing check | Purpose |
+| --- | --- | --- |
+| `check_k8s_lab` | `checks/check-lab.sh` | Cluster and lab baseline |
+| `check_k8s_services` | `checks/health_check.sh` | Pod readiness, endpoints, Service TCP |
+| `check_k8s_connectivity` | `checks/conn_test.py` | Expected HTTP, TCP, and DNS flows |
+
+Flow: **user question → agent selects check → check runs `kubectl` → report returns to agent → agent explains the evidence**. Checks use your current `kubectl` context; verify it points to the intended cluster before running them. The agent cannot change cluster resources. It reports possible causes as hypotheses until a check confirms them.
+
+On Windows, the CLI looks for Git Bash next to `git.exe` on `PATH`. Set `SRE_BASH` to a Bash executable if it is elsewhere. Set `SRE_PYTHON` if the Python executable is not named `python`. Bash, Python 3, `kubectl`, and access to the lab cluster are required for all checks.
+
 ---
 
 ## Features
@@ -51,13 +65,13 @@ The health check validates every Service in a namespace by performing:
 - Generate a JSON health report
 
 ```bash
-./scripts/health_check.sh <namespace>
+./checks/health_check.sh <namespace>
 ```
 
 Example:
 
 ```bash
-./scripts/health_check.sh sre-lab
+./checks/health_check.sh sre-lab
 ```
 
 ---
@@ -76,13 +90,13 @@ Features:
 Run the connectivity tests with:
 
 ```bash
-python3 scripts/conn_test.py specs/connectivity.json
+python3 checks/conn_test.py checks/connectivity.json
 ```
 
 On Windows, you may need to use:
 
 ```bash
-python scripts/conn_test.py specs/connectivity.json
+python checks/conn_test.py checks/connectivity.json
 ```
 
 The command exits with:
@@ -110,41 +124,32 @@ Planned checks:
 
 ## Architecture
 
-```
-                        +----------------------+
-                        |     Local Machine    |
-                        |----------------------|
-                        | kubectl / k9s        |
-                        | health_check.sh      |
-                        | conn_test.py         |
-                        | incident_detector.py |
-                        +----------+-----------+
-                                   |
-                                   | kubectl
-                                   |
-                    +--------------v---------------+
-                    |        kind Kubernetes       |
-                    |           Cluster            |
-                    +--------------+---------------+
-                                   |
-                          Namespace: sre-lab
-                                   |
-        +--------------------------+--------------------------+
-        |                          |                          |
-        |                          |                          |
-+-------v--------+        +--------v--------+        +--------v--------+
-|    netshoot    |        |     Service     |        |     Service     |
-| (test client)  |------->|      nginx      |------->|      redis      |
-+----------------+        +--------+--------+        +--------+--------+
-                                    |                          |
-                              +-----+-----+                    |
-                              |           |                    |
-                       +------v----+ +----v------+       +-----v------+
-                       | nginx Pod | | nginx Pod |       | redis Pod  |
-                       +-----------+ +-----------+       +------------+
+```mermaid
+flowchart TB
+    User[User question] --> TUI[CLI / TUI<br/>src/cli.ts]
+    TUI -->|append user message| Context[Context<br/>system prompt + conversation messages]
+    Context --> Agent[Agent loop<br/>src/agent.ts]
+    Agent -->|send Context and tool definitions| LLM[LLM stream<br/>src/llm.ts]
+    LLM -->|stream text| TUI
+    LLM --> Decision{Tool calls?}
+    Decision -->|yes| Tools[K8s tools<br/>src/k8s-tools.ts]
+    Tools --> Checks[check-lab.sh / health_check.sh / conn_test.py]
+    Checks -->|kubectl / kind / cilium| Cluster
+    Cluster -->|observations| Checks
+    Checks -->|report + exit code| Tools
+    Tools -->|tool results| Agent
+    Agent -->|append assistant and tool messages| Context
+    Decision -->|no| Save[End turn<br/>append messages to session.jsonl]
+    Save --> TUI
 
-                CoreDNS provides in-cluster DNS resolution
+    subgraph Cluster[kind Kubernetes cluster]
+        Netshoot[netshoot test Pod] --> Services[nginx / redis Services]
+        Services --> Pods[nginx / redis Pods]
+        DNS[CoreDNS] --> Netshoot
+    end
 ```
+
+When the model requests a check, the agent executes the tool and adds its result to Context. It then calls the model again with the updated Context. This repeats until the model returns without tool calls; the CLI saves the turn and waits for the next question. The checks observe the cluster through `kubectl` and return evidence for the agent to explain.
 
 ---
 
@@ -166,19 +171,19 @@ kubectl get nodes
 Make the scripts executable.
 
 ```bash
-chmod +x scripts/*.sh
+chmod +x checks/*.sh lab/setup.sh
 ```
 
 Create the demo topology.
 
 ```bash
-./scripts/setup.sh
+./lab/setup.sh
 ```
 
 Validate the environment.
 
 ```bash
-./scripts/check.sh
+./checks/check-lab.sh
 ```
 
 ---
@@ -190,30 +195,28 @@ Validate the environment.
 Run against a namespace:
 
 ```bash
-./scripts/health_check.sh <namespace>
+./checks/health_check.sh <namespace>
 ```
 
 Example:
 
 ```bash
-./scripts/health_check.sh sre-lab
+./checks/health_check.sh sre-lab
 ```
 
 ---
 
-### Connectivity Matrix _(Coming Soon)_
+### Connectivity Matrix
 
 ```bash
-./scripts/connectivity_matrix.sh <namespace>
+python3 checks/conn_test.py checks/connectivity.json
 ```
 
 ---
 
 ### Incident Detector _(Coming Soon)_
 
-```bash
-./scripts/incident_detector.sh <namespace>
-```
+There is no standalone incident detector yet. The agent can explain failures from the existing checks, but it does not implement root-cause detection or automated repair.
 
 ---
 
@@ -263,7 +266,7 @@ Exit codes:
 ## Roadmap
 
 - [x] Health Check
-- [x] Connectivity Matrix
+- [x] Connectivity Matrix and agent check tools
 - [ ] Incident Detector
 - [ ] JSON Schema documentation
 - [ ] GitHub Actions integration

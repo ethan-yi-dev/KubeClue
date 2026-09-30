@@ -17,12 +17,12 @@ if ! command -v kubectl >/dev/null 2>&1; then
 fi
 
 if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-    echo "Error: namespace '$NAMESPACE' does not exist." >&2
+    echo "Error: cannot read namespace '$NAMESPACE'; check its existence, kubectl context, and cluster access." >&2
     exit 2
 fi
 
 if ! kubectl get pod "$TEST_POD" -n "$NAMESPACE" >/dev/null 2>&1; then
-    echo "Error: test pod '$TEST_POD' does not exist in namespace '$NAMESPACE'." >&2
+    echo "Error: cannot read test pod '$TEST_POD' in namespace '$NAMESPACE'; check its existence and access." >&2
     exit 2
 fi
 

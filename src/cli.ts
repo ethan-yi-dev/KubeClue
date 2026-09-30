@@ -8,14 +8,14 @@ import * as os from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { runAgent } from './agent.js'
 import { Tui } from './tui.js'
-import { builtinTools } from './tools.js'
+import { k8sTools } from './k8s-tools.js'
 import type { Model, Context, Message } from './llm.js'
 
 const SESSION_DIR = path.join(os.homedir(), '.minipi')
 const SESSION_FILE = path.join(SESSION_DIR, 'session.jsonl')
 
 /** Fixed system prompt. */
-const SYSTEM_PROMPT = 'You are a coding assistant. Use the provided tools to read and write files and run commands to complete tasks. Read before editing, and run commands to verify changes when appropriate.'
+const SYSTEM_PROMPT = `You are a read-only Kubernetes SRE check agent for the sre-lab cluster. Use the dedicated check tools when the user asks about cluster health, Services, DNS, or connectivity. Start with the most relevant check, run more checks when needed, and explain the observed evidence in plain language. Distinguish confirmed findings from possible causes. A failing check does not by itself prove a particular root cause. Report the check name and important failures. If kubectl, Bash, Python, or the cluster is unavailable, explain that the result is inconclusive rather than calling the cluster unhealthy. Do not claim to have checked the cluster if tools were unavailable. You cannot modify cluster resources.`
 
 // Track the number of persisted messages so only new ones are appended.
 // This is CLI process state; the agent keeps its state in the context.
@@ -41,7 +41,7 @@ async function main() {
     messages: await loadSession(),
   }
 
-  const tools = builtinTools()
+  const tools = k8sTools()
   const tui = new Tui()
 
   // Each turn: accept input, run the agent, forward events to the TUI, and save the session.

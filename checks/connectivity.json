@@ -1,0 +1,30 @@
+{
+  "tests": [
+    {
+      "name": "netshoot-to-nginx-http",
+      "from_pod": "netshoot",
+      "from_namespace": "sre-lab",
+      "to_host": "nginx",
+      "to_port": 80,
+      "test_type": "http",
+      "expect": "pass"
+    },
+    {
+      "name": "netshoot-to-redis-tcp",
+      "from_pod": "netshoot",
+      "from_namespace": "sre-lab",
+      "to_host": "redis",
+      "to_port": 6379,
+      "test_type": "tcp",
+      "expect": "pass"
+    },
+    {
+      "name": "netshoot-resolves-nginx",
+      "from_pod": "netshoot",
+      "from_namespace": "sre-lab",
+      "to_host": "nginx",
+      "test_type": "dns",
+      "expect": "pass"
+    }
+  ]
+}

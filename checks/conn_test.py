@@ -4,10 +4,10 @@
 Connectivity Matrix Tester
 
 Usage:
-    python3 scripts/conn_test.py <spec.json>
+    python3 checks/conn_test.py <spec.json>
 
 Example:
-    python3 scripts/conn_test.py specs/connectivity.json
+    python3 checks/conn_test.py checks/connectivity.json
 
 Supported test types:
     tcp   - Uses nc
@@ -75,6 +75,15 @@ def run_command(command: list[str], timeout: int) -> dict[str, Any]:
             "stdout": "",
             "stderr": "",
             "error": f"executable not found: {command[0]}",
+        }
+
+    except OSError as exc:
+        return {
+            "success": False,
+            "exit_code": None,
+            "stdout": "",
+            "stderr": "",
+            "error": f"could not execute {command[0]}: {exc}",
         }
 
 
@@ -247,14 +256,26 @@ def find_source_pod(
             if pod_name.startswith(name_prefix) and pod_phase == "Running":
                 return validate_pod_status(pod, requested_name)
 
-    return {
-        "found": False,
-        "pod_name": None,
-        "reason": (
+    lookup_errors = [
+        result.get("error")
+        for result in (exact_lookup, label_lookup, all_pods_lookup)
+    ]
+    if all(lookup_errors):
+        reason = f"kubectl unavailable: {lookup_errors[0]}"
+    else:
+        reason = (
             f'source pod "{requested_name}" was not found or is not running '
             f'in namespace "{namespace}"'
-        ),
+        )
+
+    result = {
+        "found": False,
+        "pod_name": None,
+        "reason": reason,
     }
+    if all(lookup_errors):
+        result["error"] = reason
+    return result
 
 
 def validate_pod_status(
@@ -361,7 +382,7 @@ def execute_test(test: dict[str, Any], index: int) -> dict[str, Any]:
         base_result["to_port"] = test["to_port"]
 
     if not source["found"]:
-        actual = "fail"
+        actual = "error" if source.get("error") else "fail"
         matched = actual == test["expect"]
 
         return {
@@ -379,7 +400,11 @@ def execute_test(test: dict[str, Any], index: int) -> dict[str, Any]:
         timeout=test["timeout_seconds"] + 3,
     )
 
-    actual = "pass" if command_result["success"] else "fail"
+    actual = (
+        "error" if command_result.get("error")
+        else "pass" if command_result["success"]
+        else "fail"
+    )
     matched = actual == test["expect"]
 
     result = {
@@ -407,7 +432,8 @@ def build_report(results: list[dict[str, Any]]) -> dict[str, Any]:
     matched_count = sum(1 for result in results if result["matched"])
     mismatched_count = len(results) - matched_count
     actual_passed = sum(1 for result in results if result["actual"] == "pass")
-    actual_failed = len(results) - actual_passed
+    actual_failed = sum(1 for result in results if result["actual"] == "fail")
+    actual_errors = sum(1 for result in results if result["actual"] == "error")
 
     return {
         "tests": results,
@@ -417,6 +443,7 @@ def build_report(results: list[dict[str, Any]]) -> dict[str, Any]:
             "mismatched": mismatched_count,
             "actual_passed": actual_passed,
             "actual_failed": actual_failed,
+            "actual_errors": actual_errors,
             "healthy": mismatched_count == 0,
         },
     }
